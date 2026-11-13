@@ -1,0 +1,32 @@
+# RubyToFaster build & cache artifacts
+/.rtf-cache/
+/pkg/
+*.gem
+
+# Bundler & Ruby environment
+/.bundle/
+/vendor/bundle/
+Gemfile.lock
+
+# Native extension build products
+*.o
+*.so
+*.bundle
+*.dll
+mkmf.log
+Makefile
+
+# Frontend workspace artifacts (Angular, Vite, Next.js)
+node_modules/
+dist/
+.next/
+out/
+.angular/
+.vite/
+
+# Editor & OS files
+.DS_Store
+*.swp
+*~
+/coverage/
+/tmp/

@@ -1,0 +1,1 @@
+**RubyToFaster** — Minimalist script-first Ruby gem build system by [HNM Labs](https://github.com/HNMLabs) · [MIT License](https://github.com/HNMLabs/rubytofaster/blob/main/LICENSE) · [Security Policy](https://github.com/HNMLabs/rubytofaster/blob/main/SECURITY.md)

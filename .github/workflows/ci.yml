@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-dogfood:
+    name: Ruby ${{ matrix.ruby }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        ruby: ["3.1", "3.2", "3.3", "3.4"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: false
+
+      - name: Run Minitest suite (warnings enabled)
+        run: rake test
+
+      - name: Self-hosted build & reproducibility check
+        run: |
+          ./gem.build.rb
+          SHA1=$(ruby -rdigest -e 'puts Digest::SHA256.file("pkg/rubytofaster-0.1.0.gem").hexdigest')
+          ./exe/rtf build --no-cache --out-dir pkg-verify
+          SHA2=$(ruby -rdigest -e 'puts Digest::SHA256.file("pkg-verify/rubytofaster-0.1.0.gem").hexdigest')
+          test "$SHA1" = "$SHA2"
+          ./exe/rtf inspect pkg/rubytofaster-0.1.0.gem
+          gem install --local pkg/rubytofaster-0.1.0.gem --no-document
+          rtf --version
