@@ -38,12 +38,18 @@ module RubyToFaster
                 end
 
       case command
-      when "build"   then cmd_build
-      when "init"    then cmd_init
-      when "inspect" then cmd_inspect
-      when "clean"   then cmd_clean
-      when "doctor"  then cmd_doctor
-      when "watch"   then cmd_watch
+      when "build"     then cmd_build
+      when "install"   then cmd_install
+      when "diff"      then cmd_diff
+      when "check"     then cmd_check
+      when "audit"     then cmd_check
+      when "bench"     then cmd_bench
+      when "benchmark" then cmd_bench
+      when "init"      then cmd_init
+      when "inspect"   then cmd_inspect
+      when "clean"     then cmd_clean
+      when "doctor"    then cmd_doctor
+      when "watch"     then cmd_watch
       when "version"
         @out.puts "rubytofaster #{RubyToFaster::VERSION}"
         0
@@ -104,8 +110,11 @@ module RubyToFaster
         return Compiler.new(config).run
       end
 
-      RubyToFaster.build(root_dir: Dir.pwd, report: false) do |cfg|
-        cfg.gemspec(target) if target && target.end_with?(".gemspec")
+      target_dir = (target && target.end_with?(".gemspec") && File.file?(target)) ? File.dirname(File.expand_path(target)) : Dir.pwd
+      spec_arg   = (target && target.end_with?(".gemspec") && File.file?(target)) ? File.basename(target) : target
+
+      RubyToFaster.build(root_dir: target_dir, report: false) do |cfg|
+        cfg.gemspec(spec_arg) if spec_arg && spec_arg.end_with?(".gemspec")
         apply_cli_overrides!(cfg, opts)
       end
     end
@@ -132,13 +141,128 @@ module RubyToFaster
       config.verbose         = opts[:verbose]
     end
 
+    def cmd_install
+      opts = {
+        prerelease: false,
+        user_install: false,
+        force: false,
+        document: false,
+        incremental: true,
+        skip_assets: false,
+        skip_extensions: false,
+        quiet: false,
+        json: false
+      }
+      parser = OptionParser.new do |o|
+        o.banner = "Usage: rtf install [gem.build.rb | *.gemspec | pkg/*.gem] [options]"
+        o.on("--no-cache", "Disable incremental cache for compilation before install") { opts[:incremental] = false }
+        o.on("--prerelease", "Install as prerelease gem") { opts[:prerelease] = true }
+        o.on("--user-install", "Install in user's home directory") { opts[:user_install] = true }
+        o.on("-f", "--force", "Force gem installation, ignoring conflicts") { opts[:force] = true }
+        o.on("--document", "Generate RI and HTML documentation") { opts[:document] = true }
+        o.on("--json", "Emit structured JSON result") { opts[:json] = true }
+        o.on("-q", "--quiet", "Suppress output") { opts[:quiet] = true }
+      end
+      parser.parse!(@argv)
+
+      target = @argv.first
+      gem_path = if target && target.end_with?(".gem") && File.file?(target)
+                   target
+                 else
+                   res = execute_build_target(target, opts)
+                   res.gem_path
+                 end
+
+      result = Installer.new(out: @out, err: @err).install(gem_path, opts)
+      Reporter.new(io: @out, json: opts[:json], quiet: opts[:quiet]).report_install(result)
+      result.success ? 0 : 1
+    end
+
+    def cmd_diff
+      opts = { json: false }
+      OptionParser.new do |o|
+        o.banner = "Usage: rtf diff <target_a.gem> [target_b.gem] [--json]"
+        o.on("--json", "Emit structured JSON package diff") { opts[:json] = true }
+      end.parse!(@argv)
+
+      gem_a = @argv[0]
+      gem_b = @argv[1]
+
+      raise ConfigError, "Usage: rtf diff <target_a.gem> [target_b.gem]" unless gem_a
+
+      unless gem_b
+        res = execute_build_target(nil, { incremental: true, quiet: true })
+        gem_b = res.gem_path
+      end
+
+      diff_result = Differ.diff(gem_a, gem_b)
+      Reporter.new(io: @out, json: opts[:json]).report_diff(diff_result)
+      0
+    end
+
+    def cmd_check
+      opts = { strict: false, json: false, quiet: false }
+      OptionParser.new do |o|
+        o.banner = "Usage: rtf check [gem.build.rb | *.gemspec] [options]"
+        o.on("-s", "--strict", "Treat warnings as failures (exit code 1)") { opts[:strict] = true }
+        o.on("--json", "Emit structured JSON report") { opts[:json] = true }
+        o.on("-q", "--quiet", "Suppress non-error output") { opts[:quiet] = true }
+      end.parse!(@argv)
+
+      target = @argv.first
+      target_dir = (target && File.file?(target)) ? File.dirname(File.expand_path(target)) : Dir.pwd
+      config = if target && target.end_with?(".rb") && File.file?(target)
+                 RubyToFaster.load_script_config(target)
+               else
+                 cfg = Config.new(root_dir: target_dir)
+                 cfg.gemspec(File.basename(target)) if target && target.end_with?(".gemspec")
+                 cfg
+               end
+
+      report = Checker.new(config).audit
+      Reporter.new(io: @out, json: opts[:json], quiet: opts[:quiet]).report_check(report)
+
+      if report.fails.any?
+        1
+      elsif opts[:strict] && report.warnings.any?
+        1
+      else
+        0
+      end
+    end
+
+    def cmd_bench
+      opts = { iterations: 3, json: false }
+      OptionParser.new do |o|
+        o.banner = "Usage: rtf bench [gem.build.rb | *.gemspec] [--iterations N] [--json]"
+        o.on("-n", "--iterations N", Integer, "Number of benchmark iterations (default: 3)") { |n| opts[:iterations] = n }
+        o.on("--json", "Emit structured JSON benchmark report") { opts[:json] = true }
+      end.parse!(@argv)
+
+      target = @argv.first
+      target_dir = (target && File.file?(target)) ? File.dirname(File.expand_path(target)) : Dir.pwd
+      config = if target && target.end_with?(".rb") && File.file?(target)
+                 RubyToFaster.load_script_config(target)
+               else
+                 cfg = Config.new(root_dir: target_dir)
+                 cfg.gemspec(File.basename(target)) if target && target.end_with?(".gemspec")
+                 cfg
+               end
+
+      report = Benchmarker.new(config, iterations: opts[:iterations]).run
+      Reporter.new(io: @out, json: opts[:json]).report_benchmark(report)
+      0
+    end
+
     def cmd_init
-      opts = { vite: false, nextjs: false, angular: false, force: false, file: "gem.build.rb" }
+      opts = { vite: false, nextjs: false, angular: false, tailwind: false, esbuild: false, force: false, file: "gem.build.rb" }
       OptionParser.new do |o|
         o.banner = "Usage: rtf init [options]"
         o.on("--vite", "Include Vite resource pipeline configuration") { opts[:vite] = true }
         o.on("--nextjs", "Include Next.js resource pipeline configuration") { opts[:nextjs] = true }
         o.on("--angular", "Include Angular resource pipeline configuration") { opts[:angular] = true }
+        o.on("--tailwind", "Include Tailwind CSS pipeline configuration") { opts[:tailwind] = true }
+        o.on("--esbuild", "Include Esbuild resource pipeline configuration") { opts[:esbuild] = true }
         o.on("-f", "--file PATH", "Script filename (default: gem.build.rb)") { |f| opts[:file] = f }
         o.on("--force", "Overwrite existing build script") { opts[:force] = true }
       end.parse!(@argv)
@@ -162,6 +286,8 @@ module RubyToFaster
       lines << '  pkg.vite root: "frontend", out_dir: "dist", mount_to: "public/vite"' if opts[:vite]
       lines << '  pkg.nextjs root: "web", mode: :auto, mount_to: "public/nextjs"' if opts[:nextjs]
       lines << '  pkg.angular root: "admin", mount_to: "public/angular"' if opts[:angular]
+      lines << '  pkg.tailwind input: "src/input.css", output: "dist/tailwind.css", mount_to: "public/tailwind"' if opts[:tailwind]
+      lines << '  pkg.esbuild entrypoints: ["src/index.js"], out_dir: "dist", mount_to: "public/esbuild"' if opts[:esbuild]
       lines << "  pkg.budget max_compressed_kb: 512, max_unpacked_kb: 2048"
       lines << "end"
       lines << ""
@@ -206,11 +332,32 @@ module RubyToFaster
         detected_frameworks: {
           vite: Resources::Vite.detect?(Dir.pwd),
           nextjs: Resources::Nextjs.detect?(Dir.pwd),
-          angular: Resources::Angular.detect?(Dir.pwd)
+          angular: Resources::Angular.detect?(Dir.pwd),
+          tailwind: Resources::Tailwind.detect?(Dir.pwd),
+          esbuild: Resources::Esbuild.detect?(Dir.pwd)
+        },
+        toolchain: {
+          node: detect_tool_version("node", "-v"),
+          npm: detect_tool_version("npm", "-v"),
+          pnpm: detect_tool_version("pnpm", "-v"),
+          yarn: detect_tool_version("yarn", "-v"),
+          bun: detect_tool_version("bun", "-v"),
+          tailwindcss: detect_tool_version("tailwindcss", "--help") ? "present" : nil,
+          esbuild: detect_tool_version("esbuild", "--version"),
+          cargo: detect_tool_version("cargo", "--version"),
+          make: detect_tool_version("make", "--version") ? "present" : nil,
+          c_compiler: (detect_tool_version("gcc", "-v") || detect_tool_version("clang", "-v") || detect_tool_version("cc", "-v")) ? "present" : nil
         }
       }
       @out.puts JSON.pretty_generate(checks)
       0
+    end
+
+    def detect_tool_version(bin, *args)
+      out, _err, status = Open3.capture3(bin, *args)
+      status.success? ? out.strip.lines.first.to_s.strip : nil
+    rescue StandardError
+      nil
     end
 
     def cmd_watch
@@ -259,11 +406,15 @@ module RubyToFaster
     def print_help
       @out.puts <<~HELP
         RubyToFaster (rtf) v#{RubyToFaster::VERSION}
-        Minimalist, script-first Ruby gem compiler with Angular, Vite, and Next.js resources.
+        Minimalist, script-first Ruby gem compiler with Angular, Vite, Next.js, Tailwind, and Esbuild.
 
         Usage:
           rtf [build] [gem.build.rb | *.gemspec] [options]
-          rtf init [--vite] [--nextjs] [--angular]
+          rtf install [gem.build.rb | *.gem] [--prerelease] [--user-install]
+          rtf diff <target_a.gem> [target_b.gem] [--json]
+          rtf check [gem.build.rb | *.gemspec] [--strict] [--json]
+          rtf bench [gem.build.rb | *.gemspec] [--iterations N] [--json]
+          rtf init [--vite] [--nextjs] [--angular] [--tailwind] [--esbuild]
           rtf inspect <pkg/name-version.gem> [--json]
           rtf watch [gem.build.rb]
           rtf clean

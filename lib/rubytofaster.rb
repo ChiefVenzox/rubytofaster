@@ -11,16 +11,22 @@ require_relative "rubytofaster/resources/base"
 require_relative "rubytofaster/resources/vite"
 require_relative "rubytofaster/resources/nextjs"
 require_relative "rubytofaster/resources/angular"
+require_relative "rubytofaster/resources/tailwind"
+require_relative "rubytofaster/resources/esbuild"
 require_relative "rubytofaster/extension_builder"
 require_relative "rubytofaster/budget"
 require_relative "rubytofaster/packager"
 require_relative "rubytofaster/inspector"
+require_relative "rubytofaster/installer"
+require_relative "rubytofaster/differ"
+require_relative "rubytofaster/checker"
+require_relative "rubytofaster/benchmarker"
 require_relative "rubytofaster/compiler"
 require_relative "rubytofaster/reporter"
 require_relative "rubytofaster/cli"
 
 # RubyToFaster: Minimalist, script-first build system for Ruby gems
-# with native resource pipelines for Angular, Vite, and Next.js.
+# with native resource pipelines for Angular, Vite, Next.js, Tailwind CSS, and Esbuild.
 module RubyToFaster
   class << self
     attr_accessor :pending_script_capture
@@ -55,6 +61,28 @@ module RubyToFaster
     # Inspects and verifies an existing `.gem` file without extracting to disk.
     def inspect_gem(gem_path)
       Inspector.inspect_gem(gem_path)
+    end
+
+    # Diffs two compiled `.gem` files in-memory.
+    def diff(gem_a_path, gem_b_path)
+      Differ.diff(gem_a_path, gem_b_path)
+    end
+
+    # Audits project gemspec, supply-chain security, and executables.
+    def check(root_dir: Dir.pwd, config: nil)
+      cfg = config || Config.new(root_dir: root_dir)
+      Checker.new(cfg).audit
+    end
+
+    # Benchmarks RubyToFaster vs standard gem build.
+    def benchmark(root_dir: Dir.pwd, config: nil, iterations: 3)
+      cfg = config || Config.new(root_dir: root_dir)
+      Benchmarker.new(cfg, iterations: iterations).run
+    end
+
+    # Installs a built `.gem` package into the local environment.
+    def install(gem_path, options = {})
+      Installer.new.install(gem_path, options)
     end
 
     # Loads a standalone compiler script (`gem.build.rb`) and captures its Config.

@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Wiki](https://img.shields.io/badge/docs-GitHub%20Wiki-4A90E2)](https://github.com/HNMLabs/rubytofaster/wiki)
 
-**RubyToFaster** (`rtf`) is a minimalist, high-speed build system for Ruby gems that executes the package compiler directly as a lightweight script—incorporating architecture and first-class frontend resource pipelines from **Angular**, **Vite**, and **Next.js**.
+**RubyToFaster** (`rtf`) is a minimalist, high-speed build system for Ruby gems that executes the package compiler directly as a lightweight script—incorporating architecture and first-class frontend resource pipelines from **Angular**, **Vite**, **Next.js**, **Tailwind CSS**, and **Esbuild**.
 
 Instead of booting heavy task runners, spawning repeated `git` subshells, or writing brittle glue scripts to bundle modern web UIs into Ruby gems (Rails engines, Rack dashboards, admin panels, developer tools), `RubyToFaster` compiles deterministic, RubyGems-compliant `.gem` archives in **single-digit to low-double-digit milliseconds**.
 
@@ -16,11 +16,11 @@ Instead of booting heavy task runners, spawning repeated `git` subshells, or wri
 
 | Capability | Traditional `rake build` / `gem build` | **RubyToFaster (`rtf`)** |
 | :--- | :--- | :--- |
-| **Execution Model** | Requires `Rakefile` + `Bundler::GemHelper` | Runs directly as a standalone Ruby script (`gem.build.rb`) or `rtf` CLI |
+| **Execution Model** | Requires `Rakefile` + `Bundler::GemHelper` | Standalone Ruby script (`gem.build.rb`), `rtf` CLI, or drop-in `RubyToFaster::RakeTask` |
 | **Runtime Dependencies** | Rake, Bundler, external task gems | **Zero** external runtime dependencies (pure Ruby 3.0+ stdlib) |
 | **Incremental Caching** | Rebuilds `.gem` unconditionally | Content-addressable SHA-256 **Merkle cache** (`.rtf-cache/`) — **~4ms** cache hits |
 | **Packaging Engine** | Disk-bound file stats & non-sorted tar | **In-memory deterministic** `TarWriter` + `Gzip` (`SOURCE_DATE_EPOCH`, sorted entries) |
-| **Frontend Resources** | Manual Rake hooks & fragile copy tasks | Native adapters for **Vite**, **Next.js**, and **Angular** + Ruby helper codegen |
+| **Frontend Resources** | Manual Rake hooks & fragile copy tasks | Native adapters for **Vite**, **Next.js**, **Angular**, **Tailwind CSS**, and **Esbuild** |
 | **Size Governance** | None | **Angular-inspired bundle budgets** (`max_compressed_kb`, `max_unpacked_kb`, `max_entry_kb`) |
 | **Extensibility** | Imperative Rake prerequisites | **Vite/Rollup-inspired plugin hooks** (`before_resolve`, `transform`, `generate_bundle`, `after_package`) |
 | **Supply-Chain Security** | Packages whatever matches `spec.files` | Built-in path-traversal guard, symlink jail, array-only subprocesses, `.env`/key pruning |
@@ -31,13 +31,15 @@ Instead of booting heavy task runners, spawning repeated `git` subshells, or wri
 
 ```mermaid
 flowchart LR
-    Script["gem.build.rb / rtf CLI"] --> Config["RubyToFaster::Config"]
+    Script["gem.build.rb / rtf CLI / Rake"] --> Config["RubyToFaster::Config"]
     Config --> Resolver["FileResolver & Security Guard"]
     Config --> Adapters["Frontend Resource Adapters"]
     Adapters --> Vite["Vite (.vite/manifest.json)"]
     Adapters --> Next["Next.js (out/ & .next/static)"]
     Adapters --> Angular["Angular (angular.json / browser)"]
-    Vite & Next & Angular --> Manifest["Unified rtf-manifest.json + Ruby Helper"]
+    Adapters --> Tailwind["Tailwind CSS (CLI / standalone)"]
+    Adapters --> Esbuild["Esbuild (Bundler / metafile)"]
+    Vite & Next & Angular & Tailwind & Esbuild --> Manifest["Unified rtf-manifest.json + Ruby Helper"]
     Resolver & Manifest --> Cache{"SHA-256 Merkle Cache (.rtf-cache)"}
     Cache -- "Hit (~4ms)" --> Out["pkg/<name>-<version>.gem"]
     Cache -- "Miss (~18ms)" --> Ext["Parallel Native Extensions (extconf.rb)"]
@@ -263,20 +265,58 @@ rtf build --no-cache --verbose
 # Output machine-readable JSON build telemetry for CI pipelines
 rtf build --json
 
-# Scaffold an executable gem.build.rb compiler script
-rtf init --vite --nextjs --angular
+# Build and locally install the gem
+rtf install [--prerelease] [--user-install]
+
+# Deep in-memory semantic diff between two gem archives (or current build vs target)
+rtf diff pkg/my_gem-0.1.0.gem pkg/my_gem-0.2.0.gem [--json]
+
+# Audit supply-chain security, SPDX licenses, executables, and git cleanliness
+rtf check [--strict] [--json]
+
+# Benchmark RubyToFaster (cold and warm Merkle hits) vs standard gem build
+rtf bench [--iterations 3] [--json]
+
+# Scaffold an executable gem.build.rb compiler script with framework pipelines
+rtf init --vite --nextjs --angular --tailwind --esbuild
 
 # Verify SHA-256/SHA-512 checksums, inspect tar entries, and list embedded frontend manifests
-rtf inspect pkg/my_gem-0.1.0.gem
+rtf inspect pkg/my_gem-0.2.0.gem
 
 # Watch source files for instant incremental rebuilds
 rtf watch
 
-# Diagnose Ruby toolchain, gemspecs, and detected frontend configs
+# Diagnose Ruby toolchain, compilers, package managers, and detected frontend configs
 rtf doctor
 
 # Remove .rtf-cache/ and pkg/ artifacts
 rtf clean
+```
+
+---
+
+## Rake Integration (`RubyToFaster::RakeTask`)
+
+For projects that maintain a `Rakefile`, `RubyToFaster::RakeTask` provides a pure zero-dependency drop-in replacement for `Bundler::GemHelper.install_tasks`:
+
+```ruby
+# Rakefile
+require "rubytofaster/rake_task"
+
+RubyToFaster::RakeTask.new do |t|
+  t.out_dir     = "pkg"
+  t.incremental = true
+end
+```
+
+This registers the following standard tasks:
+
+```bash
+rake build        # Build gem with RubyToFaster (Merkle cached)
+rake rtf:install  # Build and install gem locally
+rake rtf:check    # Audit supply-chain security, licenses, and shebangs
+rake rtf:bench    # Benchmark RubyToFaster vs standard gem build
+rake rtf:clean    # Clean build artifacts and .rtf-cache/
 ```
 
 ---

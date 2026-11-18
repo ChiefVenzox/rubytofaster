@@ -71,7 +71,52 @@ end
 
 ---
 
-## 4. Zero-Dependency Ruby Runtime Asset Helper
+## 4. Tailwind CSS Resource Adapter (`pkg.tailwind`)
+
+- **Auto-detection:** Recognizes `tailwind.config.{js,ts,cjs,mjs}` or `application.tailwind.css`.
+- **Standalone CLI & npm support:** Executes standalone `./tailwindcss` binary or `@tailwindcss/cli`.
+- **Single file or directory output:** Mounts compiled CSS directly into your gem's public directory.
+
+```ruby
+RubyToFaster.build do |pkg|
+  pkg.gemspec "theme_gem.gemspec"
+
+  pkg.tailwind(
+    root: ".",
+    input: "app/assets/stylesheets/application.tailwind.css",
+    output: "dist/tailwind.css",
+    mount_to: "public/tailwind",
+    auto_build: true
+  )
+end
+```
+
+---
+
+## 5. Esbuild Resource Adapter (`pkg.esbuild`)
+
+- **Auto-detection:** Recognizes `esbuild.config.{js,mjs,cjs,ts}` or `package.json` with `esbuild`.
+- **Rails 7/8 jsbundling-rails ready:** Bundles modern JS & CSS into `dist/` or `app/assets/builds/`.
+- **Metafile inspection:** Parses `metafile.json` when present to extract precise entrypoints, CSS bundles, and dependencies.
+
+```ruby
+RubyToFaster.build do |pkg|
+  pkg.gemspec "admin_engine.gemspec"
+
+  pkg.esbuild(
+    root: ".",
+    entrypoints: ["app/javascript/application.js"],
+    out_dir: "dist",
+    mount_to: "public/esbuild",
+    auto_build: true,
+    sourcemaps: false
+  )
+end
+```
+
+---
+
+## 6. Zero-Dependency Ruby Runtime Asset Helper
 
 Add `pkg.generate_asset_helper` to embed a standalone Ruby module inside your gem:
 

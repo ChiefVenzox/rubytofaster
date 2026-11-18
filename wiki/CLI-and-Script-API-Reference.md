@@ -5,17 +5,21 @@
 | Command | Description |
 | :--- | :--- |
 | `rtf [build] [target]` | Compiles `.gem` from `gem.build.rb`, `*.gemspec`, or explicit target script/gemspec. |
-| `rtf init [flags]` | Generates an executable `gem.build.rb` script (`--vite`, `--nextjs`, `--angular`, `--force`, `-f PATH`). |
+| `rtf install [target]` | Compiles and locally installs the gem via `gem install --local` (`--prerelease`, `--user-install`, `--force`). |
+| `rtf diff <gem_a> [gem_b]` | Semantic in-memory diff between two `.gem` packages or current build vs target archive (`--json`). |
+| `rtf check [target]` | Supply-chain security, SPDX license compliance, executables, and git cleanliness audit (`--strict`, `--json`). |
+| `rtf bench [target]` | Direct multi-iteration benchmark vs standard `gem build` (`--iterations N`, `--json`). |
+| `rtf init [flags]` | Generates an executable `gem.build.rb` script (`--vite`, `--nextjs`, `--angular`, `--tailwind`, `--esbuild`, `--force`). |
 | `rtf inspect <file.gem>` | Verifies SHA-256/SHA-512 checksums and prints file table & frontend manifests (`--json`). |
 | `rtf watch [target]` | Watches source files and runs incremental builds (`-i SECONDS`). |
-| `rtf doctor` | Prints JSON diagnostics for Ruby, RubyGems, gemspecs, and detected frontend frameworks. |
+| `rtf doctor` | Prints JSON diagnostics for Ruby, compilers, package managers, and detected frameworks. |
 | `rtf clean` | Deletes `.rtf-cache/` and `pkg/`. |
 | `rtf version` | Prints `rubytofaster` version (`-v`, `--version`). |
 
 ### `rtf build` Options
 
 - `--no-cache` — Ignore `.rtf-cache` and force a fresh package build.
-- `--skip-assets` — Skip Vite, Next.js, and Angular resource collection.
+- `--skip-assets` — Skip Vite, Next.js, Angular, Tailwind, and Esbuild resource collection.
 - `--skip-extensions` — Skip native C/Rust extension verification.
 - `-o, --out-dir DIR` — Output directory for the compiled `.gem` (default: `pkg`).
 - `--json` — Print structured JSON build telemetry (`BuildResult#to_h`).
@@ -45,9 +49,11 @@ result = RubyToFaster.build(root_dir: __dir__, report: true) do |pkg|
   pkg.exclude "spec/**/*", "docs/**/*"
 
   # 4. Frontend Resource Adapters
-  pkg.vite    root: "frontend", out_dir: "dist", mount_to: "public/vite"
-  pkg.nextjs  root: "portal",   mode: :auto,     mount_to: "public/nextjs"
-  pkg.angular root: "admin",    project: "app",  mount_to: "public/angular"
+  pkg.vite     root: "frontend", out_dir: "dist", mount_to: "public/vite"
+  pkg.nextjs   root: "portal",   mode: :auto,     mount_to: "public/nextjs"
+  pkg.angular  root: "admin",    project: "app",  mount_to: "public/angular"
+  pkg.tailwind input: "src/input.css", output: "dist/tailwind.css", mount_to: "public/tailwind"
+  pkg.esbuild  entrypoints: ["src/index.js"], out_dir: "dist", mount_to: "public/esbuild"
   pkg.generate_asset_helper module_name: "MyGem::Assets", path: "lib/my_gem/assets.rb"
   pkg.write_staged_assets = false
 

@@ -14,4 +14,7 @@ task :build_self do
   sh RbConfig.ruby, "-Ilib", "gem.build.rb"
 end
 
+require_relative "lib/rubytofaster/rake_task"
+RubyToFaster::RakeTask.new
+
 task default: :test

@@ -172,9 +172,11 @@ module RubyToFaster
 
       configured.map do |res_cfg|
         adapter_klass = case res_cfg[:type]
-                        when :vite    then Resources::Vite
-                        when :nextjs  then Resources::Nextjs
-                        when :angular then Resources::Angular
+                        when :vite     then Resources::Vite
+                        when :nextjs   then Resources::Nextjs
+                        when :angular  then Resources::Angular
+                        when :tailwind then Resources::Tailwind
+                        when :esbuild  then Resources::Esbuild
                         else
                           raise ConfigError, "Unknown resource adapter type: #{res_cfg[:type].inspect}"
                         end
@@ -202,6 +204,18 @@ module RubyToFaster
 
       if !existing_types.include?(:angular) && Resources::Angular.detect?(root) && Dir.exist?(File.join(root, "dist"))
         discovered << { type: :angular, root: ".", mount_to: "public/angular", auto_build: false }
+      end
+
+      if !existing_types.include?(:tailwind) && Resources::Tailwind.detect?(root) &&
+         (File.file?(File.join(root, "dist/tailwind.css")) || File.file?(File.join(root, "app/assets/builds/application.css")))
+        out = File.file?(File.join(root, "dist/tailwind.css")) ? "dist/tailwind.css" : "app/assets/builds/application.css"
+        discovered << { type: :tailwind, root: ".", output: out, mount_to: "public/tailwind", auto_build: false }
+      end
+
+      if !existing_types.include?(:esbuild) && Resources::Esbuild.detect?(root) &&
+         (Dir.exist?(File.join(root, "dist")) || Dir.exist?(File.join(root, "app/assets/builds")))
+        out = Dir.exist?(File.join(root, "dist")) ? "dist" : "app/assets/builds"
+        discovered << { type: :esbuild, root: ".", out_dir: out, mount_to: "public/esbuild", auto_build: false }
       end
 
       discovered

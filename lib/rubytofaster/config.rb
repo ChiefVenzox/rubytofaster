@@ -134,6 +134,35 @@ module RubyToFaster
       }
     end
 
+    # Register a Tailwind CSS resource pipeline.
+    def tailwind(root: ".", input: nil, output: "dist/tailwind.css", out_dir: nil, mount_to: "public/tailwind", build_command: nil, auto_build: false, **opts)
+      @resources << {
+        type: :tailwind,
+        root: root,
+        input: input,
+        output: output,
+        out_dir: out_dir,
+        mount_to: mount_to,
+        build_command: build_command,
+        auto_build: auto_build,
+        options: opts
+      }
+    end
+
+    # Register an Esbuild JS/CSS bundling resource pipeline.
+    def esbuild(root: ".", entrypoints: nil, out_dir: "dist", mount_to: "public/esbuild", build_command: nil, auto_build: false, **opts)
+      @resources << {
+        type: :esbuild,
+        root: root,
+        entrypoints: entrypoints,
+        out_dir: out_dir,
+        mount_to: mount_to,
+        build_command: build_command,
+        auto_build: auto_build,
+        options: opts
+      }
+    end
+
     # Configure embedded Ruby runtime helper generation for staged frontend manifests.
     def generate_asset_helper(module_name:, path:)
       @asset_helper_module = module_name
