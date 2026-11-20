@@ -123,11 +123,16 @@ module RubyToFaster
           asset_map[clean_rel] = {
             gem_path: gem_dest,
             size: stat.size,
-            sha256: Digest::SHA256.file(full).hexdigest
+            sha256: Digest::SHA256.file(full).hexdigest,
+            integrity: compute_sri_file(full)
           }
         end
 
         [staged, asset_map]
+      end
+
+      def compute_sri_file(path)
+        "sha384-#{[Digest::SHA384.file(path).digest].pack('m0')}"
       end
 
       def monotonic_ms

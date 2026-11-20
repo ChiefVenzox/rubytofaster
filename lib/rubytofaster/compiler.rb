@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "stringio"
+require "zlib"
 
 module RubyToFaster
   # Immutable result returned by `RubyToFaster.build` and `Compiler#run`.
@@ -41,9 +43,26 @@ module RubyToFaster
     end
   end
 
-  # Orchestrates file resolution, Angular/Vite/Next.js resource collection,
-  # Merkle cache lookup, native extension verification, and deterministic `.gem` packaging.
+  # Orchestrates file resolution, 11-framework frontend resource collection,
+  # deterministic asset precompression, SBOM embedding, Merkle cache lookup,
+  # parallel C/Rust extension verification, and deterministic `.gem` packaging.
   class Compiler
+    PRECOMPRESS_EXTS = %w[.js .mjs .cjs .css .html .htm .svg .json .xml .wasm .txt].freeze
+
+    ADAPTER_MAP = {
+      vite:      Resources::Vite,
+      nextjs:    Resources::Nextjs,
+      angular:   Resources::Angular,
+      tailwind:  Resources::Tailwind,
+      esbuild:   Resources::Esbuild,
+      astro:     Resources::Astro,
+      sveltekit: Resources::SvelteKit,
+      nuxt:      Resources::Nuxt,
+      webpack:   Resources::Webpack,
+      parcel:    Resources::Parcel,
+      sass:      Resources::Sass
+    }.freeze
+
     def initialize(config)
       @config        = config
       @file_resolver = FileResolver.new(config)
@@ -66,9 +85,12 @@ module RubyToFaster
       t0 = monotonic_ms
       adapter_results = @config.skip_assets ? [] : collect_frontend_resources
       merge_frontend_resources!(entries, adapter_results)
+      precompress_staged_assets!(entries, adapter_results) if @config.precompress && !adapter_results.empty?
       timings[:resources_ms] = elapsed_since(t0)
 
       @plugin_runner.run_generate_bundle(entries, @config)
+
+      embed_sbom_entry!(spec, entries, adapter_results) if @config.sbom
 
       out_file_name = spec.file_name
       target_gem_path = File.join(@config.resolved_out_dir, out_file_name)
@@ -85,6 +107,7 @@ module RubyToFaster
           unpacked_bytes: cached_meta[:unpacked_bytes],
           entry_sizes: entry_sizes
         )
+        write_checksums_file!(target_gem_path) if @config.checksums_file
 
         result = BuildResult.new(
           gem_name: spec.name,
@@ -122,6 +145,7 @@ module RubyToFaster
         entry_sizes: pkg_stats.entry_sizes
       )
 
+      write_checksums_file!(target_gem_path) if @config.checksums_file
       total_ms = elapsed_since(total_t0)
 
       @cache.store(
@@ -171,15 +195,11 @@ module RubyToFaster
       end
 
       configured.map do |res_cfg|
-        adapter_klass = case res_cfg[:type]
-                        when :vite     then Resources::Vite
-                        when :nextjs   then Resources::Nextjs
-                        when :angular  then Resources::Angular
-                        when :tailwind then Resources::Tailwind
-                        when :esbuild  then Resources::Esbuild
-                        else
-                          raise ConfigError, "Unknown resource adapter type: #{res_cfg[:type].inspect}"
-                        end
+        adapter_klass = ADAPTER_MAP[res_cfg[:type]]
+        unless adapter_klass
+          raise ConfigError, "Unknown resource adapter type: #{res_cfg[:type].inspect}"
+        end
+
         adapter_klass.new(
           project_root: @config.root_dir,
           spec_config: res_cfg,
@@ -206,10 +226,39 @@ module RubyToFaster
         discovered << { type: :angular, root: ".", mount_to: "public/angular", auto_build: false }
       end
 
+      if !existing_types.include?(:astro) && Resources::Astro.detect?(root) &&
+         (Dir.exist?(File.join(root, "dist/client")) || Dir.exist?(File.join(root, "dist")))
+        discovered << { type: :astro, root: ".", mount_to: "public/astro", auto_build: false }
+      end
+
+      if !existing_types.include?(:sveltekit) && Resources::SvelteKit.detect?(root) &&
+         (Dir.exist?(File.join(root, "build")) || Dir.exist?(File.join(root, ".svelte-kit/output/client")))
+        discovered << { type: :sveltekit, root: ".", mount_to: "public/sveltekit", auto_build: false }
+      end
+
+      if !existing_types.include?(:nuxt) && Resources::Nuxt.detect?(root) &&
+         (Dir.exist?(File.join(root, ".output/public")) || Dir.exist?(File.join(root, "dist")))
+        discovered << { type: :nuxt, root: ".", mount_to: "public/nuxt", auto_build: false }
+      end
+
+      if !existing_types.include?(:webpack) && Resources::Webpack.detect?(root) &&
+         (Dir.exist?(File.join(root, "public/packs")) || Dir.exist?(File.join(root, "dist")))
+        discovered << { type: :webpack, root: ".", mount_to: "public/webpack", auto_build: false }
+      end
+
+      if !existing_types.include?(:parcel) && Resources::Parcel.detect?(root) && Dir.exist?(File.join(root, "dist"))
+        discovered << { type: :parcel, root: ".", out_dir: "dist", mount_to: "public/parcel", auto_build: false }
+      end
+
       if !existing_types.include?(:tailwind) && Resources::Tailwind.detect?(root) &&
          (File.file?(File.join(root, "dist/tailwind.css")) || File.file?(File.join(root, "app/assets/builds/application.css")))
         out = File.file?(File.join(root, "dist/tailwind.css")) ? "dist/tailwind.css" : "app/assets/builds/application.css"
         discovered << { type: :tailwind, root: ".", output: out, mount_to: "public/tailwind", auto_build: false }
+      end
+
+      if !existing_types.include?(:sass) && Resources::Sass.detect?(root) &&
+         File.file?(File.join(root, "dist/application.css"))
+        discovered << { type: :sass, root: ".", output: "dist/application.css", mount_to: "public/sass", auto_build: false }
       end
 
       if !existing_types.include?(:esbuild) && Resources::Esbuild.detect?(root) &&
@@ -255,6 +304,63 @@ module RubyToFaster
         executable: false
       )
       persist_staged_entry(helper_rel, entries[helper_rel]) if @config.write_staged_assets
+    end
+
+    def precompress_staged_assets!(entries, adapter_results)
+      epoch = @config.source_date_epoch || (@config.reproducible ? Packager::DEFAULT_EPOCH : Time.now.to_i)
+      min_bytes = @config.precompress.is_a?(Hash) ? @config.precompress.fetch(:min_bytes, 128) : 128
+
+      adapter_results.each do |res|
+        res.entries.each do |gem_path, entry|
+          next unless PRECOMPRESS_EXTS.include?(File.extname(gem_path).downcase)
+
+          raw = entry.bytes
+          next if raw.bytesize < min_bytes
+
+          buf = StringIO.new("".b)
+          gz = Zlib::GzipWriter.new(buf, Zlib::BEST_COMPRESSION)
+          gz.mtime = epoch
+          gz.write(raw)
+          gz.close
+          gz_bytes = buf.string
+
+          next unless gz_bytes.bytesize < raw.bytesize
+
+          gz_path = "#{gem_path}.gz"
+          entries[gz_path] = PackageEntry.new(
+            gem_path: gz_path,
+            source_path: nil,
+            content: gz_bytes,
+            mode: 0o644,
+            executable: false
+          )
+          persist_staged_entry(gz_path, entries[gz_path]) if @config.write_staged_assets
+        end
+      end
+    end
+
+    def embed_sbom_entry!(spec, entries, adapter_results)
+      fmt = @config.sbom.to_sym
+      epoch = @config.source_date_epoch || (@config.reproducible ? Packager::DEFAULT_EPOCH : nil)
+      sbom_json = SBOM.new(
+        spec: spec,
+        entries: entries,
+        reproducible_epoch: epoch,
+        adapter_results: adapter_results
+      ).to_json_pretty(format: fmt)
+
+      sbom_path = fmt == :spdx ? "sbom.spdx.json" : "sbom.cdx.json"
+      entries[sbom_path] = PackageEntry.new(
+        gem_path: sbom_path,
+        source_path: nil,
+        content: sbom_json,
+        mode: 0o644,
+        executable: false
+      )
+    end
+
+    def write_checksums_file!(target_gem_path)
+      File.write("#{target_gem_path}.sha256", Verifier.checksums_line(target_gem_path))
     end
 
     def persist_staged_entry(gem_path, entry)

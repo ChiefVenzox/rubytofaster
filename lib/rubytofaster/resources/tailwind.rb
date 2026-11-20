@@ -77,7 +77,8 @@ module RubyToFaster
           asset_map[rel_name] = {
             gem_path: gem_dest,
             size: stat.size,
-            sha256: Digest::SHA256.file(output_path).hexdigest
+            sha256: Digest::SHA256.file(output_path).hexdigest,
+            integrity: compute_sri_file(output_path)
           }
 
           entrypoints[rel_name] = {

@@ -4,7 +4,8 @@ require "json"
 
 module RubyToFaster
   # Builds unified frontend resource manifests and zero-dependency Ruby runtime asset helpers
-  # so gems bundling Vite, Next.js, or Angular UIs can resolve hashed chunks without Node.js at runtime.
+  # so gems bundling Vite, Next.js, Angular, Astro, SvelteKit, Nuxt, Tailwind, Esbuild, Webpack,
+  # Parcel, or Sass UIs can resolve hashed chunks with SRI & HTTP/2 preload headers without Node.js.
   class AssetManifest
     MANIFEST_SCHEMA = 1
 
@@ -60,8 +61,23 @@ module RubyToFaster
       nil
     end
 
+    # Returns the SHA-384 Subresource Integrity (SRI) string for a logical asset or entrypoint.
+    def integrity(logical_name, framework: nil)
+      fw_map = @data["frameworks"] || {}
+      targets = framework ? { framework.to_s => fw_map[framework.to_s] }.compact : fw_map
+
+      targets.each_value do |info|
+        ep = info.dig("entrypoints", logical_name.to_s)
+        resolved = ep && ep["file"] ? ep["file"] : logical_name.to_s
+        sri = info.dig("assets", resolved, "integrity")
+        return sri if sri
+      end
+      nil
+    end
+
     # Generates `<link rel="stylesheet">` and `<script type="module">` HTML tags for an entrypoint.
-    def html_tags(entry_name, framework: nil, url_prefix: "/")
+    # Pass `sri: true` to emit `integrity="sha384-..." crossorigin="anonymous"` attributes.
+    def html_tags(entry_name, framework: nil, url_prefix: "/", sri: false)
       prefix = url_prefix.end_with?("/") ? url_prefix : "#{url_prefix}/"
       fw_map = @data["frameworks"] || {}
       targets = framework ? { framework.to_s => fw_map[framework.to_s] }.compact : fw_map
@@ -70,15 +86,48 @@ module RubyToFaster
         ep = info.dig("entrypoints", entry_name.to_s)
         next unless ep
 
+        assets = info["assets"] || {}
         tags = []
         Array(ep["css"]).each do |css_rel|
-          tags << %(<link rel="stylesheet" href="#{prefix}#{css_rel.sub(%r{\A/}, '')}">)
+          clean = css_rel.sub(%r{\A/}, "")
+          sri_attr = sri_attribute(assets, clean, sri)
+          tags << %(<link rel="stylesheet" href="#{prefix}#{clean}"#{sri_attr}>)
         end
         scripts = ep["scripts"] ? Array(ep["scripts"]) : [ep["file"]].compact
         scripts.each do |js_rel|
-          tags << %(<script type="module" src="#{prefix}#{js_rel.sub(%r{\A/}, '')}"></script>)
+          next if js_rel.end_with?(".css")
+
+          clean = js_rel.sub(%r{\A/}, "")
+          sri_attr = sri_attribute(assets, clean, sri)
+          tags << %(<script type="module" src="#{prefix}#{clean}"#{sri_attr}></script>)
         end
         return tags.join("\n")
+      end
+
+      ""
+    end
+
+    # Generates an HTTP `Link` header value suitable for HTTP/2 Push or HTTP 103 Early Hints.
+    def preload_headers(entry_name, framework: nil, url_prefix: "/")
+      prefix = url_prefix.end_with?("/") ? url_prefix : "#{url_prefix}/"
+      fw_map = @data["frameworks"] || {}
+      targets = framework ? { framework.to_s => fw_map[framework.to_s] }.compact : fw_map
+
+      targets.each_value do |info|
+        ep = info.dig("entrypoints", entry_name.to_s)
+        next unless ep
+
+        links = []
+        Array(ep["css"]).each do |css_rel|
+          links << %(<#{prefix}#{css_rel.sub(%r{\A/}, '')}>; rel=preload; as=style)
+        end
+        scripts = ep["scripts"] ? Array(ep["scripts"]) : [ep["file"]].compact
+        scripts.each do |js_rel|
+          next if js_rel.end_with?(".css")
+
+          links << %(<#{prefix}#{js_rel.sub(%r{\A/}, '')}>; rel=modulepreload; as=script)
+        end
+        return links.join(", ")
       end
 
       ""
@@ -113,7 +162,19 @@ module RubyToFaster
           nil
         end
 
-        def self.html_tags(entry, framework: nil, url_prefix: "/")
+        def self.integrity(name, framework: nil)
+          fws = MANIFEST["frameworks"] || {}
+          scope = framework ? { framework.to_s => fws[framework.to_s] }.compact : fws
+          scope.each_value do |info|
+            ep = info.dig("entrypoints", name.to_s)
+            resolved = ep && ep["file"] ? ep["file"] : name.to_s
+            sri = info.dig("assets", resolved, "integrity")
+            return sri if sri
+          end
+          nil
+        end
+
+        def self.html_tags(entry, framework: nil, url_prefix: "/", sri: false)
           prefix = url_prefix.end_with?("/") ? url_prefix : "\#{url_prefix}/"
           fws = MANIFEST["frameworks"] || {}
           scope = framework ? { framework.to_s => fws[framework.to_s] }.compact : fws
@@ -121,11 +182,41 @@ module RubyToFaster
             ep = info.dig("entrypoints", entry.to_s)
             next unless ep
 
+            assets = info["assets"] || {}
             tags = []
-            Array(ep["css"]).each { |c| tags << %(<link rel="stylesheet" href="\#{prefix}\#{c.sub(%r{\\A/}, '')}">) }
+            Array(ep["css"]).each do |c|
+              clean = c.sub(%r{\\A/}, "")
+              sri_val = sri ? assets.dig(clean, "integrity") : nil
+              sri_attr = sri_val ? %( integrity="\#{sri_val}" crossorigin="anonymous") : ""
+              tags << %(<link rel="stylesheet" href="\#{prefix}\#{clean}"\#{sri_attr}>)
+            end
             scripts = ep["scripts"] ? Array(ep["scripts"]) : [ep["file"]].compact
-            scripts.each { |j| tags << %(<script type="module" src="\#{prefix}\#{j.sub(%r{\\A/}, '')}"></script>) }
+            scripts.each do |j|
+              next if j.end_with?(".css")
+
+              clean = j.sub(%r{\\A/}, "")
+              sri_val = sri ? assets.dig(clean, "integrity") : nil
+              sri_attr = sri_val ? %( integrity="\#{sri_val}" crossorigin="anonymous") : ""
+              tags << %(<script type="module" src="\#{prefix}\#{clean}"\#{sri_attr}></script>)
+            end
             return tags.join("\\n")
+          end
+          ""
+        end
+
+        def self.preload_headers(entry, framework: nil, url_prefix: "/")
+          prefix = url_prefix.end_with?("/") ? url_prefix : "\#{url_prefix}/"
+          fws = MANIFEST["frameworks"] || {}
+          scope = framework ? { framework.to_s => fws[framework.to_s] }.compact : fws
+          scope.each_value do |info|
+            ep = info.dig("entrypoints", entry.to_s)
+            next unless ep
+
+            links = []
+            Array(ep["css"]).each { |c| links << %(<\#{prefix}\#{c.sub(%r{\\A/}, '')}>; rel=preload; as=style) }
+            scripts = ep["scripts"] ? Array(ep["scripts"]) : [ep["file"]].compact
+            scripts.each { |j| links << %(<\#{prefix}\#{j.sub(%r{\\A/}, '')}>; rel=modulepreload; as=script) unless j.end_with?(".css") }
+            return links.join(", ")
           end
           ""
         end
@@ -156,6 +247,15 @@ module RubyToFaster
       else
         obj
       end
+    end
+
+    private
+
+    def sri_attribute(assets, clean_path, enabled)
+      return "" unless enabled
+
+      val = assets.dig(clean_path, "integrity")
+      val ? %( integrity="#{val}" crossorigin="anonymous") : ""
     end
   end
 end

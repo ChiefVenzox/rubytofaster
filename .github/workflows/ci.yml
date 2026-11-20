@@ -34,11 +34,14 @@ jobs:
 
       - name: Self-hosted build & reproducibility check
         run: |
+          VERSION=$(ruby -Ilib -rrubytofaster/version -e 'puts RubyToFaster::VERSION')
           ./gem.build.rb
-          SHA1=$(ruby -rdigest -e 'puts Digest::SHA256.file("pkg/rubytofaster-0.1.0.gem").hexdigest')
+          SHA1=$(ruby -rdigest -e "puts Digest::SHA256.file('pkg/rubytofaster-${VERSION}.gem').hexdigest")
           ./exe/rtf build --no-cache --out-dir pkg-verify
-          SHA2=$(ruby -rdigest -e 'puts Digest::SHA256.file("pkg-verify/rubytofaster-0.1.0.gem").hexdigest')
+          SHA2=$(ruby -rdigest -e "puts Digest::SHA256.file('pkg-verify/rubytofaster-${VERSION}.gem').hexdigest")
           test "$SHA1" = "$SHA2"
-          ./exe/rtf inspect pkg/rubytofaster-0.1.0.gem
-          gem install --local pkg/rubytofaster-0.1.0.gem --no-document
+          ./exe/rtf verify --reproducible
+          ./exe/rtf inspect "pkg/rubytofaster-${VERSION}.gem"
+          ./exe/rtf stats "pkg/rubytofaster-${VERSION}.gem"
+          gem install --local "pkg/rubytofaster-${VERSION}.gem" --no-document
           rtf --version

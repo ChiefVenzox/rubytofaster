@@ -1,13 +1,17 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Full-stack Ruby Engine / Dashboard gem embedding Vite, Next.js, and Angular assets
+# Full-stack Ruby Engine / Dashboard gem embedding Vite, Next.js, Angular, Astro, and Tailwind CSS
+# with deterministic .gz precompression, SHA-384 SRI helpers, and embedded CycloneDX SBOM.
 require "rubytofaster"
 
 RubyToFaster.build(root_dir: __dir__) do |pkg|
   pkg.gemspec "admin_engine.gemspec"
-  pkg.incremental  = true
-  pkg.reproducible = true
+  pkg.incremental       = true
+  pkg.reproducible      = true
+  pkg.precompress_assets true
+  pkg.embed_sbom :cyclonedx
+  pkg.checksums_file    = true
 
   # 1. Vite asset pipeline (parses dist/.vite/manifest.json)
   pkg.vite(
@@ -33,7 +37,22 @@ RubyToFaster.build(root_dir: __dir__) do |pkg|
     auto_build: true
   )
 
-  # Emit zero-dependency Ruby helper so Rack/Rails views resolve hashed assets without Node.js at runtime
+  # 4. Astro docs/island bundle
+  pkg.astro(
+    root: "ui/astro-docs",
+    mount_to: "public/admin_engine/docs",
+    auto_build: true
+  )
+
+  # 5. Tailwind CSS utility stylesheet
+  pkg.tailwind(
+    input: "ui/styles/app.css",
+    output: "ui/styles/dist/app.css",
+    mount_to: "public/admin_engine/styles",
+    auto_build: true
+  )
+
+  # Emit zero-dependency Ruby helper (asset_path, integrity, html_tags with SRI, preload_headers)
   pkg.generate_asset_helper(
     module_name: "AdminEngine::Assets",
     path: "lib/admin_engine/assets.rb"

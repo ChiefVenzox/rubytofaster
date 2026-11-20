@@ -69,6 +69,31 @@ module RubyToFaster
           report = RubyToFaster::Benchmarker.new(cfg).run
           RubyToFaster::Reporter.new.report_benchmark(report)
         end
+
+        desc "Generate CycloneDX SBOM for the gem"
+        task :sbom do
+          cfg = RubyToFaster::Config.new
+          cfg.gemspec(@gemspec) if @gemspec
+          puts RubyToFaster.sbom(config: cfg, format: :cyclonedx)
+        end
+
+        desc "Show package composition and size breakdown"
+        task :stats => name do
+          built = Dir.glob(File.join(@out_dir, "*.gem")).max_by { |f| File.mtime(f) }
+          raise "No built gem found in #{@out_dir}" unless built
+
+          stats = RubyToFaster.stats(built)
+          RubyToFaster::Reporter.new.report_stats(stats)
+        end
+
+        desc "Verify bit-for-bit reproducible gem builds"
+        task :verify do
+          cfg = RubyToFaster::Config.new
+          cfg.gemspec(@gemspec) if @gemspec
+          report = RubyToFaster::Verifier.verify_reproducible(cfg)
+          RubyToFaster::Reporter.new.report_verify(report)
+          exit(1) unless report.passed?
+        end
       end
     end
   end

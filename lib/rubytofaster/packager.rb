@@ -149,11 +149,20 @@ module RubyToFaster
 
     def gzip_deterministic(raw_bytes, epoch)
       buf = StringIO.new("".b)
-      gz  = Zlib::GzipWriter.new(buf, Zlib::BEST_COMPRESSION)
+      gz  = Zlib::GzipWriter.new(buf, resolve_compression_level)
       gz.mtime = epoch
       gz.write(raw_bytes)
       gz.close
       buf.string
+    end
+
+    def resolve_compression_level
+      case @config.compression_level
+      when :fast    then Zlib::BEST_SPEED
+      when :best    then Zlib::BEST_COMPRESSION
+      when Integer  then [[@config.compression_level, 0].max, 9].min
+      else               Zlib::DEFAULT_COMPRESSION
+      end
     end
 
     def compute_digests(bytes)

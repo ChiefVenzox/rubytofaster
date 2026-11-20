@@ -8,12 +8,13 @@ Gem::Specification.new do |spec|
   spec.authors       = ["HNM Labs"]
   spec.email         = ["opensource@hnmlabs.dev"]
 
-  spec.summary       = "Minimalist, script-first build system for Ruby gems with Angular, Vite, and Next.js resource integration."
+  spec.summary       = "Minimalist, script-first build system for Ruby gems with 11 frontend pipelines, C/Rust extensions, and SBOM."
   spec.description   = <<~DESC.tr("\n", " ").strip
     RubyToFaster is a minimalist, high-speed build system and deterministic package compiler for Ruby gems.
-    Execute gem builds directly as standalone Ruby scripts with content-addressable incremental caching,
-    parallel native extension compilation, bundle budgets, and first-class resource adapters for Angular,
-    Vite, and Next.js applications.
+    Execute gem builds directly as standalone Ruby scripts with content-addressable Merkle caching,
+    parallel C/Rust native extension compilation, CycloneDX/SPDX SBOM generation, monorepo workspaces,
+    bundle budgets, SRI asset helpers, and native resource adapters for Vite, Next.js, Angular, Astro,
+    SvelteKit, Nuxt, Webpack, Parcel, Tailwind CSS, Sass, and Esbuild.
   DESC
   spec.homepage      = "https://github.com/HNMLabs/rubytofaster"
   spec.license       = "MIT"

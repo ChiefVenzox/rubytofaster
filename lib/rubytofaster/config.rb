@@ -11,7 +11,8 @@ module RubyToFaster
                   :reproducible, :source_date_epoch, :parallel_jobs,
                   :strict_security, :auto_detect_resources, :skip_assets,
                   :skip_extensions, :write_staged_assets, :quiet, :verbose,
-                  :asset_helper_module, :asset_helper_path
+                  :asset_helper_module, :asset_helper_path,
+                  :precompress, :sbom, :checksums_file, :compression_level
 
     DEFAULT_EXCLUDES = [
       %r{\A\.git(/|\z)},
@@ -22,6 +23,11 @@ module RubyToFaster
       %r{(?:\A|/)\.next/cache(/|\z)},
       %r{(?:\A|/)\.angular/cache(/|\z)},
       %r{(?:\A|/)\.vite(/|\z)},
+      %r{(?:\A|/)\.parcel-cache(/|\z)},
+      %r{(?:\A|/)\.svelte-kit/cache(/|\z)},
+      %r{(?:\A|/)\.nuxt(/|\z)},
+      %r{(?:\A|/)\.astro(/|\z)},
+      %r{(?:\A|/)target/(?:debug|release)(/|\z)},
       %r{\.gem\z},
       %r{(?:\A|/)\.env(?:\..+)?\z},
       %r{(?:\A|/)(?:id_rsa|id_ed25519|.*\.(?:pem|key|p12))\z}i
@@ -46,6 +52,10 @@ module RubyToFaster
       @verbose               = false
       @asset_helper_module   = nil
       @asset_helper_path     = nil
+      @precompress           = false
+      @sbom                  = nil
+      @checksums_file        = false
+      @compression_level     = :default
       @resources             = []
       @budgets               = []
       @plugins               = []
@@ -163,10 +173,100 @@ module RubyToFaster
       }
     end
 
+    # Register an Astro static/hybrid frontend resource pipeline.
+    def astro(root: ".", out_dir: nil, mount_to: "public/astro", build_command: nil, auto_build: false, **opts)
+      @resources << {
+        type: :astro,
+        root: root,
+        out_dir: out_dir,
+        mount_to: mount_to,
+        build_command: build_command,
+        auto_build: auto_build,
+        options: opts
+      }
+    end
+
+    # Register a SvelteKit frontend resource pipeline.
+    def sveltekit(root: ".", out_dir: nil, mount_to: "public/sveltekit", build_command: nil, auto_build: false, **opts)
+      @resources << {
+        type: :sveltekit,
+        root: root,
+        out_dir: out_dir,
+        mount_to: mount_to,
+        build_command: build_command,
+        auto_build: auto_build,
+        options: opts
+      }
+    end
+
+    # Register a Nuxt 3/4 frontend resource pipeline.
+    def nuxt(root: ".", out_dir: nil, mount_to: "public/nuxt", build_command: nil, auto_build: false, **opts)
+      @resources << {
+        type: :nuxt,
+        root: root,
+        out_dir: out_dir,
+        mount_to: mount_to,
+        build_command: build_command,
+        auto_build: auto_build,
+        options: opts
+      }
+    end
+
+    # Register a Webpack frontend resource pipeline.
+    def webpack(root: ".", out_dir: nil, mount_to: "public/webpack", build_command: nil, auto_build: false, **opts)
+      @resources << {
+        type: :webpack,
+        root: root,
+        out_dir: out_dir,
+        mount_to: mount_to,
+        build_command: build_command,
+        auto_build: auto_build,
+        options: opts
+      }
+    end
+
+    # Register a Parcel frontend resource pipeline.
+    def parcel(root: ".", out_dir: "dist", mount_to: "public/parcel", build_command: nil, auto_build: false, **opts)
+      @resources << {
+        type: :parcel,
+        root: root,
+        out_dir: out_dir,
+        mount_to: mount_to,
+        build_command: build_command,
+        auto_build: auto_build,
+        options: opts
+      }
+    end
+
+    # Register a Dart Sass / SCSS stylesheet resource pipeline.
+    def sass(root: ".", input: nil, output: "dist/application.css", out_dir: nil, mount_to: "public/sass", build_command: nil, auto_build: false, **opts)
+      @resources << {
+        type: :sass,
+        root: root,
+        input: input,
+        output: output,
+        out_dir: out_dir,
+        mount_to: mount_to,
+        build_command: build_command,
+        auto_build: auto_build,
+        options: opts
+      }
+    end
+
     # Configure embedded Ruby runtime helper generation for staged frontend manifests.
     def generate_asset_helper(module_name:, path:)
       @asset_helper_module = module_name
       @asset_helper_path   = path
+    end
+
+    # Enable deterministic in-memory gzip (.gz) precompression for staged static assets.
+    def precompress_assets(enabled = true)
+      @precompress = enabled
+    end
+
+    # Embed a CycloneDX (:cyclonedx) or SPDX (:spdx) SBOM inside the built .gem package.
+    def embed_sbom(format = :cyclonedx)
+      @sbom = format ? format.to_sym : nil
     end
 
     # Register Angular-inspired package and asset size budgets.

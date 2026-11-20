@@ -28,6 +28,7 @@ module RubyToFaster
       root_hash << "rtf:#{RubyToFaster::VERSION}\n"
       root_hash << "ruby:#{RUBY_VERSION}:#{RUBY_PLATFORM}\n"
       root_hash << "reproducible:#{@config.reproducible}:#{@config.source_date_epoch}\n"
+      root_hash << "precompress:#{@config.precompress}:sbom:#{@config.sbom}:zlib:#{@config.compression_level}\n"
       root_hash << "spec:#{spec.name}:#{spec.version}:#{spec.platform}\n"
       root_hash << "summary:#{spec.summary}\n"
       root_hash << "description:#{spec.description}\n"
